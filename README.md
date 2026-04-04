@@ -38,16 +38,15 @@ all_df = our_setup.look_at_all_results()
 all_df.to_csv('AllResults.csv')
 ```
 
-### Step 3: Evaluate detection (AUC and accuracy)
+### Step 3: Evaluate detection (AUC)
 
 Computes AUC for distinguishing stolen vs independent models.
 
 ```python
-all_out, all_auc, loss_and_score_have_sign_pos_corr = our_setup.check_alldf(
-    all_df, threshold='mid', which_steals='bestloss', measure='pscore'
+all_auc, loss_and_score_have_sign_pos_corr = our_setup.check_alldf(
+    all_df, which_steals='bestloss', measure='pscore'
 )
 all_auc.to_csv('AUC_results.csv')
-all_out.to_csv('AllOut.csv')
 ```
 
 ### Step 4: Test robustness to embedding transforms
