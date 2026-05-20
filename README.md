@@ -8,9 +8,25 @@ conda activate graph_ownership_verification
 pip install -r requirements.txt
 ```
 
+## Supported datasets
+
+The full pipeline (Steps 1-7) is configured for these five node-classification datasets. Per-dataset hyperparameters are taken from `sensitivity.py`.
+
+| Dataset      | Loader                       | `dim_h` | `dim_out` |
+|--------------|------------------------------|---------|-----------|
+| `citeseer`   | `get_data.get_data_citeseer` | 8       | 6         |
+| `dblp`       | `get_data.get_data_dblp`     | 8       | 4         |
+| `amazon`     | `get_data.get_data_amazon`   | 8       | 5         |
+| `amazoncomp` | `get_data.get_data_amazoncomp` | 8     | 10        |
+| `pubmed`     | `get_data.get_data_pubmed`   | 32      | 3         |
+
+All five use `bm_loss_type='CE'`, `bm_end_target='node'`, and `split_size=2000`.
+
 ## Usage
 
 All steps below are independent after Step 1 completes. Run them in order the first time; afterwards, any step can be re-run on its own since intermediate results are cached to disk.
+
+Each step below shows the command for every supported dataset. To run only one dataset, drop the others from the `DATASETS` dict (or just load the one you want).
 
 ### Step 1: Train models and find stationary points
 
@@ -19,12 +35,22 @@ This trains base models, stolen models, and computes stationary points for a dat
 ```python
 import get_data, our_setup
 
-citeseer = get_data.get_data_citeseer()
-all_Z_citeseer = our_setup.do_all(
-    dataset=citeseer, dataset_name='citeseer',
-    split_size=2000, dim_h=8, dim_out=6,
-    bm_loss_type='CE', bm_end_target='node', epochs=500
-)
+DATASETS = {
+    'citeseer':   dict(loader=get_data.get_data_citeseer,   dim_h=8,  dim_out=6),
+    'dblp':       dict(loader=get_data.get_data_dblp,       dim_h=8,  dim_out=4),
+    'amazon':     dict(loader=get_data.get_data_amazon,     dim_h=8,  dim_out=5),
+    'amazoncomp': dict(loader=get_data.get_data_amazoncomp, dim_h=8,  dim_out=10),
+    'pubmed':     dict(loader=get_data.get_data_pubmed,     dim_h=32, dim_out=3),
+}
+
+loaded = {name: cfg['loader']() for name, cfg in DATASETS.items()}
+
+for name, cfg in DATASETS.items():
+    our_setup.do_all(
+        dataset=loaded[name], dataset_name=name,
+        split_size=2000, dim_h=cfg['dim_h'], dim_out=cfg['dim_out'],
+        bm_loss_type='CE', bm_end_target='node', epochs=500
+    )
 ```
 
 ### Step 2: Aggregate results across all datasets
@@ -56,7 +82,7 @@ Tests whether detection still works after applying transformations (rotations, s
 ```python
 import transforms
 
-all_df_pscores, all_df_pass, all_df_pass_allbms = transforms.do_all(citeseer=citeseer)
+all_df_pscores, all_df_pass, all_df_pass_allbms = transforms.do_all(**loaded)
 all_df_pscores.to_csv('AllDfPscores.csv')
 all_df_pass.to_csv('AllDfPass.csv')
 all_df_pass_allbms.to_csv('AllDfPassAllBms.csv')
@@ -69,7 +95,7 @@ Measures how detection AUC varies with different lambda_reg values.
 ```python
 import sensitivity
 
-auc_sens = sensitivity.do_several_vary_lambdareg(all_df, citeseer=citeseer)
+auc_sens = sensitivity.do_several_vary_lambdareg(all_df, **loaded)
 auc_sens.to_csv('VaryLambda.csv')
 ```
 
@@ -81,17 +107,18 @@ Computes pairwise distances and cosine similarities between stationary points to
 import pickle, numpy as np
 from pandas import Series
 
-with open('StatPts_citeseer_bm_GCN8s1', 'rb') as file:
-    this_pts = pickle.load(file)
+for name, cfg in DATASETS.items():
+    with open(f"StatPts_{name}_bm_GCN{cfg['dim_h']}s1", 'rb') as file:
+        this_pts = pickle.load(file)
 
-z = [this_pts[i][j]['lo']
-     for i in this_pts.keys()
-     for j in list(this_pts[i].keys())[0:1]
-     if this_pts[i][j]['lo'].shape[0] == 2]
+    z = [this_pts[i][j]['lo']
+         for i in this_pts.keys()
+         for j in list(this_pts[i].keys())[0:1]
+         if this_pts[i][j]['lo'].shape[0] == 2]
 
-dists = [np.linalg.norm(z[i] - z[j]) / np.sqrt(np.linalg.norm(z[i]) * np.linalg.norm(z[j]))
-         for i in range(len(z)) for j in range(i + 1, len(z))]
-Series(dists).to_csv('DISTS_citeseer_lo.csv')
+    dists = [np.linalg.norm(z[i] - z[j]) / np.sqrt(np.linalg.norm(z[i]) * np.linalg.norm(z[j]))
+             for i in range(len(z)) for j in range(i + 1, len(z))]
+    Series(dists).to_csv(f'DISTS_{name}_lo.csv')
 ```
 
 ### Step 7: Pscore distribution of independent models
@@ -121,5 +148,5 @@ tmp[indep_cols].T.to_csv('INDEP_MODEL_PSCORES.csv')
 | `AllDfPass.csv` | Step 4 | Whether each transform passes detection |
 | `AllDfPassAllBms.csv` | Step 4 | Pass rates relative to all independent base models |
 | `VaryLambda.csv` | Step 5 | AUC vs regularization strength |
-| `DISTS_citeseer_lo.csv` | Step 6 | Pairwise distances between stationary points |
+| `DISTS_<dataset>_lo.csv` | Step 6 | Pairwise distances between stationary points (one per dataset) |
 | `INDEP_MODEL_PSCORES.csv` | Step 7 | Pscore distribution for independent models |
